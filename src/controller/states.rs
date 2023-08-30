@@ -18,21 +18,34 @@ pub enum State {
 
 pub struct Control {
     cached_res: PlatformStatusInfo,
-    current_state: State,
 }
-
+      
 impl Control {
     pub fn new() -> Control {
         Control { 
             cached_res: PlatformStatusInfo { 
                 statuses: Vec::new() 
-            }, 
-            current_state: State::Init 
+            }
         }
     }
 
     #[async_recursion]
     pub async fn run(&self) {
+        let mut state = State::Init;
+        let mut c = Control{
+            cached_res: PlatformStatusInfo { 
+                statuses: self.cached_res.statuses 
+            }
+        };
+
+        loop {
+            let res = self.next(state).await;
+            state = res.1;
+            c = res.0;
+        }
+    }
+
+    async fn next(&self, state: State) -> (Control, State) {
         let res = match status_check::check_status().await {
             Ok(res) => {
                 println!("Response from api: {:?}", res);
@@ -43,16 +56,26 @@ impl Control {
             }
         };
 
-        match self.current_state {
+        match state {
             State::Init => {
                 let con = self.init(res).await;
                 sleep(Duration::from_millis(3000)).await;
-                con.run().await;
+                (con, State::Run)
             }
             State::Run => {
                 let statuses = PlatformStatusInfo::new(res);
                 let con = self.run_check(statuses.statuses).await;
-                con.run().await;
+                match con.0 {
+                    None => {
+                        sleep(Duration::from_millis(3000)).await;
+                        (con.1, State::Run)
+                    },
+                    Some(status_diffs) => {
+                        // todo impl sending discord webhooks
+                        sleep(Duration::from_millis(3000)).await;
+                        (con.1, State::SendWebhook)
+                    }
+                }
             }
             State::SendWebhook => {
 
@@ -74,14 +97,21 @@ impl Control {
         Control{cached_res: PlatformStatusInfo { statuses: new_cache }, current_state: State::Run}
     }
 
-    async fn run_check(&self, res: Vec<Status>) -> Control {
-        let mut vec_diff: Vec<Status> = vec![];
-        for i in res {
+    async fn run_check(&self, res: Vec<Status>) -> (Option<&Vec<Status>>, Control) {
+        let mut vec_diff: Vec<&Status> = vec![];
+        for i in &res {
             if !self.cached_res.statuses.contains(&i) {
                 vec_diff.push(i);
             }
         }
 
-        Control{cached_res: PlatformStatusInfo{statuses: vec_diff}, current_state: State::Run}
+        let mut control = Control{cached_res: PlatformStatusInfo{statuses: res}, current_state: State::Run};
+
+        if vec_diff.last().is_none() {
+            (None, control)
+        } else {
+            control.current_state = State::SendWebhook;
+            (Some(&vec_diff), control)
+        }
     }
 }
