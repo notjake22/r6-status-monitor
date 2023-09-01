@@ -6,9 +6,10 @@ use crate::api::{
         status_check,
         status_check::StatusResponse
     };
+use crate::discord::webhook::Webhook;
 use std::vec;
 use tokio::time::{sleep, Duration};
-use async_recursion::async_recursion;
+// use async_recursion::async_recursion;
 
 pub enum State {
     Init,
@@ -18,34 +19,41 @@ pub enum State {
 
 pub struct Control {
     cached_res: PlatformStatusInfo,
+    current_state: State,
+    webhook: String
 }
       
 impl Control {
-    pub fn new() -> Control {
+    pub fn new(uri: String) -> Control {
         Control { 
             cached_res: PlatformStatusInfo { 
                 statuses: Vec::new() 
-            }
+            },
+            current_state: State::Init,
+            webhook: uri
         }
     }
 
-    #[async_recursion]
     pub async fn run(&self) {
-        let mut state = State::Init;
         let mut c = Control{
             cached_res: PlatformStatusInfo { 
-                statuses: self.cached_res.statuses 
-            }
+                statuses: Vec::new()
+            },
+            current_state: State::Init,
+            webhook: self.webhook.clone()
         };
 
         loop {
-            let res = self.next(state).await;
-            state = res.1;
-            c = res.0;
+            let res = self.next(c).await;
+            c = Control{
+                cached_res: res.0.cached_res,
+                current_state: res.1,
+                webhook: res.0.webhook
+            };
         }
     }
 
-    async fn next(&self, state: State) -> (Control, State) {
+    async fn next(&self, control: Control) -> (Control, State) {
         let res = match status_check::check_status().await {
             Ok(res) => {
                 println!("Response from api: {:?}", res);
@@ -56,29 +64,56 @@ impl Control {
             }
         };
 
-        match state {
+        match control.current_state {
             State::Init => {
+                println!("Initializing");
                 let con = self.init(res).await;
                 sleep(Duration::from_millis(3000)).await;
                 (con, State::Run)
             }
             State::Run => {
-                let statuses = PlatformStatusInfo::new(res);
-                let con = self.run_check(statuses.statuses).await;
-                match con.0 {
+                println!("Checking Cache");
+                let stats = PlatformStatusInfo::new_ref(&res);
+                let diff_option = self.run_check(&stats.statuses);
+                match diff_option {
                     None => {
                         sleep(Duration::from_millis(3000)).await;
-                        (con.1, State::Run)
+                        (Control{
+                            cached_res: PlatformStatusInfo { statuses: PlatformStatusInfo::new(res).statuses },
+                            current_state: State::Run,
+                            webhook: self.webhook.clone()
+                        }, State::Run)
                     },
-                    Some(status_diffs) => {
-                        // todo impl sending discord webhooks
-                        sleep(Duration::from_millis(3000)).await;
-                        (con.1, State::SendWebhook)
+                    Some(_) => {
+                        // chose to not use passed differential vector to just use the response from req 
+                        (Control{
+                            cached_res: PlatformStatusInfo::new(res),
+                            current_state: State::Run,
+                            webhook: self.webhook.clone()
+                        }, State::SendWebhook)
                     }
                 }
             }
             State::SendWebhook => {
+                let hook = Webhook::new(control.cached_res, self.webhook.clone());
 
+                match hook.send_webhook().await {
+                    Ok(_) => {
+                        println!("Webhook sent with status change");
+                        sleep(Duration::from_millis(3000)).await;
+                        (Control{
+                            cached_res: PlatformStatusInfo { 
+                                statuses: Vec::new() 
+                            }, 
+                            current_state: State::Init,
+                            webhook: control.webhook.clone()
+                        }, State::Init)
+                    }
+                    Err(error) => {
+                        panic!("Error sending webhook for update status: {:?}", error);
+                    }
+                }
+                
             }
         }   
     }
@@ -86,32 +121,33 @@ impl Control {
     async fn init(&self, statuses: Vec<StatusResponse>) -> Control {
         let mut new_cache: Vec<Status> = Vec::new();
         for i in statuses {
-            new_cache.push(Status 
-                { 
+            new_cache.push(Status { 
                     platform: i.platform, 
                     status: i.status, 
                     impacted_features: i.impacted_features 
                 }
             )
         }
-        Control{cached_res: PlatformStatusInfo { statuses: new_cache }, current_state: State::Run}
+        Control{
+            cached_res: PlatformStatusInfo 
+                { statuses: new_cache }, 
+            current_state: State::Run,
+            webhook: self.webhook.clone()
+        }
     }
 
-    async fn run_check(&self, res: Vec<Status>) -> (Option<&Vec<Status>>, Control) {
+    fn run_check<'a>(&'a self, res: &'a Vec<Status>) -> Option<Vec<&Status>> {
         let mut vec_diff: Vec<&Status> = vec![];
-        for i in &res {
+        for i in res {
             if !self.cached_res.statuses.contains(&i) {
                 vec_diff.push(i);
             }
         }
 
-        let mut control = Control{cached_res: PlatformStatusInfo{statuses: res}, current_state: State::Run};
-
         if vec_diff.last().is_none() {
-            (None, control)
+            None
         } else {
-            control.current_state = State::SendWebhook;
-            (Some(&vec_diff), control)
+            Some(vec_diff)
         }
     }
 }
