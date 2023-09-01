@@ -1,8 +1,8 @@
 use reqwest::{Error, header};
 use reqwest;
 
-use serde_derive::Deserialize;
-use serde_derive::Serialize;
+use serde_derive::{Deserialize, Serialize};
+use serde_json::Value;
 use reqwest::Client;
 
 pub type Statuses = Vec<StatusResponse>;
@@ -25,7 +25,7 @@ pub struct StatusResponse {
     #[serde(rename = "Status")]
     pub status: String,
     #[serde(rename = "Maintenance")]
-    pub maintenance: bool,
+    pub maintenance: Value,
     #[serde(rename = "ImpactedFeatures")]
     pub impacted_features: Vec<String>,
 }

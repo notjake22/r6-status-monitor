@@ -1,14 +1,18 @@
-use crate::models::statuses::{
+use crate::{
+    discord::webhook::Webhook,
+    models::statuses::{
         PlatformStatusInfo,
         Status
-    };
-use crate::api::{
+    },
+    api::{
         status_check,
         status_check::StatusResponse
-    };
-use crate::discord::webhook::Webhook;
+    }
+};
 use std::vec;
-use tokio::time::{sleep, Duration};
+use tokio::time::{
+    sleep, Duration
+};
 // use async_recursion::async_recursion;
 
 pub enum State {
@@ -56,7 +60,7 @@ impl Control {
     async fn next(&self, control: Control) -> (Control, State) {
         let res = match status_check::check_status().await {
             Ok(res) => {
-                println!("Response from api: {:?}", res);
+                // println!("Response from api: {:?}", res);
                 res
             }
             Err(error) => {
@@ -138,10 +142,19 @@ impl Control {
 
     fn run_check<'a>(&'a self, res: &'a Vec<Status>) -> Option<Vec<&Status>> {
         let mut vec_diff: Vec<&Status> = vec![];
+        // dont really care too much about having nested loops just
+        // because its only 3 items were going to be looping through each time
         for i in res {
-            if !self.cached_res.statuses.contains(&i) {
-                vec_diff.push(i);
+            for c in &self.cached_res.statuses {
+                if i.platform == c.platform {
+                    if i.status != c.status {
+                        vec_diff.push(i);
+                    }
+                }
             }
+            // if !self.cached_res.statuses.contains(&i) {
+            //     vec_diff.push(i);
+            // }
         }
 
         if vec_diff.last().is_none() {
