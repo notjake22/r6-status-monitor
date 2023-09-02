@@ -22,9 +22,9 @@ pub enum State {
 }
 
 pub struct Control {
-    cached_res: PlatformStatusInfo,
-    current_state: State,
-    webhook: String
+    pub cached_res: PlatformStatusInfo,
+    pub current_state: State,
+    pub webhook: String
 }
       
 impl Control {
@@ -140,7 +140,8 @@ impl Control {
         }
     }
 
-    fn run_check<'a>(&'a self, res: &'a Vec<Status>) -> Option<Vec<&Status>> {
+    // temp set to pub for testing
+    pub fn run_check<'a>(&'a self, res: &'a Vec<Status>) -> Option<Vec<&Status>> {
         let mut vec_diff: Vec<&Status> = vec![];
         // dont really care too much about having nested loops just
         // because its only 3 items were going to be looping through each time

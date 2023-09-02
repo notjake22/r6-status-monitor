@@ -2,12 +2,12 @@ use serde::Serialize;
 use serde::Deserialize;
 use crate::api::status_check::StatusResponse;
 
-#[derive(Deserialize, Serialize, PartialEq)]
+#[derive(Deserialize, Serialize, PartialEq, Debug)]
 pub struct PlatformStatusInfo {
     pub statuses: Vec<Status>
 }
 
-#[derive(Deserialize, Serialize, PartialEq)]
+#[derive(Deserialize, Serialize, PartialEq, Debug)]
 pub struct Status {
     pub platform: String,
     pub status: String, 
